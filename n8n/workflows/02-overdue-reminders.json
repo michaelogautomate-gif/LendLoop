@@ -1,0 +1,324 @@
+{
+  "id": "lendloop-overdue-reminders",
+  "name": "LendLoop - Daily Overdue Reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "20000001-0000-4000-8000-000000000001",
+      "name": "Daily 08:00 UTC Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [180, 220]
+    },
+    {
+      "parameters": {},
+      "id": "20000001-0000-4000-8000-000000000002",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [180, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst secret = $env.CONVEX_AUTOMATION_SECRET;\nif (!secret || secret.length < 16) {\n  throw new Error('Missing or short CONVEX_AUTOMATION_SECRET environment variable');\n}\n\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst eventId = `overdue-poll:${new Date().toISOString().slice(0, 10)}:${timestamp}`;\nconst signatureHex = crypto\n  .createHmac('sha256', secret)\n  .update(`${timestamp}.`)\n  .digest('hex');\n\nreturn [{\n  json: {\n    timestamp,\n    eventId,\n    signature: `sha256=${signatureHex}`,\n  },\n}];"
+      },
+      "id": "20000001-0000-4000-8000-000000000003",
+      "name": "Sign GET Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.CONVEX_HTTP_BASE_URL || 'http://host.docker.internal:3211') + '/api/automation/overdue-loans' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Event-Id",
+              "value": "={{ $json.eventId }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "20000001-0000-4000-8000-000000000004",
+      "name": "GET Overdue Loans",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-overdue-loans",
+              "leftValue": "={{ Array.isArray($json.overdueLoans) ? $json.overdueLoans.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "20000001-0000-4000-8000-000000000005",
+      "name": "Any Overdue Loans?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "overdueLoans",
+        "options": {}
+      },
+      "id": "20000001-0000-4000-8000-000000000006",
+      "name": "Split Out Overdue Loans",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1140, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const dateKey = String($('GET Overdue Loans').first()?.json?.dateKey || new Date().toISOString().slice(0, 10));\nconst items = $input.all();\n\nreturn items\n  .filter((item) => !item.json?.alreadyRemindedToday)\n  .map((item) => {\n    const loan = item.json || {};\n    const loanId = String(loan.loanId || '');\n    const borrowerEmail = String(loan.borrowerEmail || '');\n    const borrowerFirstName = String(loan.borrowerFirstName || 'Neighbor');\n    const toolName = String(loan.toolName || 'Borrowed Tool');\n    const endDate = String(loan.endDate || '');\n    const daysOverdue = Number(loan.daysOverdue || 1);\n\n    if (!loanId || !borrowerEmail) {\n      throw new Error(`Overdue loan record missing loanId or borrowerEmail`);\n    }\n\n    return {\n      json: {\n        loanId,\n        dateKey,\n        idempotencyKey: `overdue:${loanId}:${dateKey}`,\n        borrowerEmail,\n        borrowerFirstName,\n        toolName,\n        subject: `[LendLoop] Friendly overdue reminder: \"${toolName}\" (${daysOverdue}d overdue)`,\n        text: `Hi ${borrowerFirstName},\\n\\nFriendly reminder that \"${toolName}\" was due back on ${endDate} and is currently ${daysOverdue} day(s) overdue.\\n\\nPlease return it to your neighbor so they can mark the loan returned in LendLoop.\\n\\n— LendLoop`,\n      },\n    };\n  });"
+      },
+      "id": "20000001-0000-4000-8000-000000000007",
+      "name": "Filter Unreminded & Format Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1380, 220]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.LENDLOOP_FROM_EMAIL || 'noreply@lendloop.local' }}",
+        "toEmail": "={{ $json.borrowerEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "20000001-0000-4000-8000-000000000008",
+      "name": "Send Overdue Reminder",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1620, 220],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "smtp": {
+          "id": "lendloop-mailpit-smtp",
+          "name": "LendLoop Mailpit SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst secret = $env.CONVEX_AUTOMATION_SECRET;\nif (!secret || secret.length < 16) {\n  throw new Error('Missing or short CONVEX_AUTOMATION_SECRET environment variable');\n}\n\nconst formattedItems = $('Filter Unreminded & Format Email').all();\nreturn formattedItems.map((item) => {\n  const { loanId, dateKey, idempotencyKey } = item.json;\n  const timestamp = String(Math.floor(Date.now() / 1000));\n  const payloadObj = {\n    idempotencyKey,\n    loanId,\n    dateKey,\n    channel: 'email',\n  };\n  const rawBody = JSON.stringify(payloadObj);\n  const signatureHex = crypto\n    .createHmac('sha256', secret)\n    .update(`${timestamp}.${rawBody}`)\n    .digest('hex');\n\n  return {\n    json: {\n      loanId,\n      idempotencyKey,\n      timestamp,\n      signature: `sha256=${signatureHex}`,\n      rawBody,\n    },\n  };\n});"
+      },
+      "id": "20000001-0000-4000-8000-000000000009",
+      "name": "Build & Sign Idempotent Write-Back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1860, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.CONVEX_HTTP_BASE_URL || 'http://host.docker.internal:3211') + '/api/automation/overdue-reminders' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Event-Id",
+              "value": "={{ $json.idempotencyKey }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.rawBody }}",
+        "options": {}
+      },
+      "id": "20000001-0000-4000-8000-000000000010",
+      "name": "Record Reminder in Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2100, 220],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {},
+      "id": "20000001-0000-4000-8000-000000000011",
+      "name": "No Overdue Loans",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1140, 400]
+    }
+  ],
+  "connections": {
+    "Daily 08:00 UTC Schedule": {
+      "main": [
+        [
+          {
+            "node": "Sign GET Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Sign GET Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign GET Request": {
+      "main": [
+        [
+          {
+            "node": "GET Overdue Loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Overdue Loans": {
+      "main": [
+        [
+          {
+            "node": "Any Overdue Loans?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Overdue Loans?": {
+      "main": [
+        [
+          {
+            "node": "Split Out Overdue Loans",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Overdue Loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out Overdue Loans": {
+      "main": [
+        [
+          {
+            "node": "Filter Unreminded & Format Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Unreminded & Format Email": {
+      "main": [
+        [
+          {
+            "node": "Send Overdue Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Overdue Reminder": {
+      "main": [
+        [
+          {
+            "node": "Build & Sign Idempotent Write-Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build & Sign Idempotent Write-Back": {
+      "main": [
+        [
+          {
+            "node": "Record Reminder in Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "lendloop-error-handler"
+  },
+  "tags": []
+}
+

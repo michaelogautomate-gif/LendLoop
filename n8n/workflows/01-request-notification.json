@@ -1,0 +1,248 @@
+{
+  "id": "lendloop-request-notification",
+  "name": "LendLoop - Request Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-loan-event",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "10000001-0000-4000-8000-000000000001",
+      "name": "Loan Event Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "lendloop-loan-event"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst item = $input.first();\nconst headers = {};\nfor (const [k, v] of Object.entries(item?.json?.headers || {})) {\n  headers[k.toLowerCase()] = Array.isArray(v) ? v[0] : v;\n}\n\nconst secret = $env.N8N_WEBHOOK_SECRET || '';\nif (!secret || secret.length < 16) {\n  throw new Error('Missing or short N8N_WEBHOOK_SECRET environment variable (min 16 chars)');\n}\n\nlet rawBuffer = null;\ntry {\n  rawBuffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n} catch {\n  const inlineBase64 = item?.binary?.data?.data;\n  if (inlineBase64) {\n    rawBuffer = Buffer.from(inlineBase64, 'base64');\n  }\n}\n\nconst rawBody = rawBuffer && rawBuffer.length > 0\n  ? rawBuffer.toString('utf8')\n  : JSON.stringify(item?.json?.body || {});\n\nconst timestamp = String(headers['x-lendloop-timestamp'] || '').trim();\nconst signatureHeader = String(headers['x-lendloop-signature'] || '').trim();\n\nif (!/^\\d+$/.test(timestamp)) {\n  return [{ json: { valid: false, reason: 'Malformed X-LendLoop-Timestamp header.' } }];\n}\n\nconst nowSeconds = Math.floor(Date.now() / 1000);\nif (Math.abs(nowSeconds - Number(timestamp)) > 300) {\n  return [{ json: { valid: false, reason: 'Webhook timestamp outside +/-300s replay window.' } }];\n}\n\nconst providedHex = signatureHeader.replace(/^sha256=/i, '').toLowerCase();\nif (!/^[0-9a-f]{64}$/.test(providedHex)) {\n  return [{ json: { valid: false, reason: 'Malformed HMAC signature header.' } }];\n}\n\nconst expectedHex = crypto\n  .createHmac('sha256', secret)\n  .update(`${timestamp}.${rawBody}`)\n  .digest('hex');\n\nconst a = Buffer.from(providedHex, 'hex');\nconst b = Buffer.from(expectedHex, 'hex');\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {\n  return [{ json: { valid: false, reason: 'Invalid HMAC-SHA256 signature.' } }];\n}\n\nconst body = JSON.parse(rawBody);\nconst eventId = String(body.eventId || '');\nconst eventType = String(body.eventType || '');\nconst loanId = String(body.loanId || '');\nconst toolName = String(body.toolName || 'Tool');\nconst startDate = String(body.startDate || '');\nconst endDate = String(body.endDate || '');\nconst recipientEmail = String(body.recipientEmail || '');\nconst recipientFirstName = String(body.recipientFirstName || 'Neighbor');\n\nif (!eventId || !eventType || !loanId || !recipientEmail) {\n  throw new Error('Verified webhook payload missing required minimal fields.');\n}\n\nconst subjectMap = {\n  loan_requested: `[LendLoop] New borrow request: ${toolName}`,\n  loan_approved: `[LendLoop] Borrow request approved: ${toolName}`,\n  loan_declined: `[LendLoop] Borrow request declined: ${toolName}`,\n  loan_returned: `[LendLoop] Return confirmed: ${toolName}`,\n};\n\nconst textMap = {\n  loan_requested: `Hi ${recipientFirstName},\\n\\nA neighbor requested to borrow your \"${toolName}\" from ${startDate} to ${endDate}.\\n\\nOpen LendLoop (/dashboard) to approve or decline this request.\\n\\n— LendLoop`,\n  loan_approved: `Hi ${recipientFirstName},\\n\\nYour borrow request for \"${toolName}\" (${startDate} to ${endDate}) was approved!\\n\\nPlease coordinate pickup and return it by ${endDate}.\\n\\n— LendLoop`,\n  loan_declined: `Hi ${recipientFirstName},\\n\\nYour borrow request for \"${toolName}\" (${startDate} to ${endDate}) was declined.\\n\\nBrowse other available neighborhood tools in LendLoop.\\n\\n— LendLoop`,\n  loan_returned: `Hi ${recipientFirstName},\\n\\nYour loan for \"${toolName}\" (${startDate} to ${endDate}) has been marked returned. Thanks for sharing!\\n\\n— LendLoop`,\n};\n\nreturn [{\n  json: {\n    valid: true,\n    eventId,\n    eventType,\n    loanId,\n    recipientEmail,\n    recipientFirstName,\n    subject: subjectMap[eventType] || `[LendLoop] Loan update: ${toolName}`,\n    text: textMap[eventType] || `Hi ${recipientFirstName},\\n\\nLoan update for \"${toolName}\": ${body.status}.\\n\\n— LendLoop`,\n  },\n}];"
+      },
+      "id": "10000001-0000-4000-8000-000000000002",
+      "name": "Verify HMAC & Format Copy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "hmac-valid-check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "10000001-0000-4000-8000-000000000003",
+      "name": "Signature Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.LENDLOOP_FROM_EMAIL || 'noreply@lendloop.local' }}",
+        "toEmail": "={{ $json.recipientEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "10000001-0000-4000-8000-000000000004",
+      "name": "Send Notification Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [920, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "smtp": {
+          "id": "lendloop-mailpit-smtp",
+          "name": "LendLoop Mailpit SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst evt = $('Verify HMAC & Format Copy').item.json;\nconst secret = $env.CONVEX_AUTOMATION_SECRET || '';\nif (!secret || secret.length < 16) {\n  throw new Error('Missing or short CONVEX_AUTOMATION_SECRET environment variable (min 16 chars)');\n}\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst rawBody = JSON.stringify({\n  idempotencyKey: evt.eventId,\n  loanId: evt.loanId,\n  status: 'delivered',\n  summary: 'Notification email sent via n8n',\n});\nconst signatureHex = crypto\n  .createHmac('sha256', secret)\n  .update(`${timestamp}.${rawBody}`)\n  .digest('hex');\n\nreturn [{\n  json: {\n    eventId: evt.eventId,\n    timestamp,\n    signature: `sha256=${signatureHex}`,\n    rawBody,\n  },\n}];"
+      },
+      "id": "10000001-0000-4000-8000-000000000007",
+      "name": "Build & Sign Event Ack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.CONVEX_HTTP_BASE_URL || 'http://host.docker.internal:3211') + '/api/automation/event-ack' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Event-Id",
+              "value": "={{ $json.eventId }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.rawBody }}",
+        "options": {}
+      },
+      "id": "10000001-0000-4000-8000-000000000008",
+      "name": "Ack Event to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ received: true, eventId: $('Verify HMAC & Format Copy').item.json.eventId }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "10000001-0000-4000-8000-000000000005",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1640, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ received: false, error: $json.reason || 'Unauthorized' }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "10000001-0000-4000-8000-000000000006",
+      "name": "Respond 401 Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [920, 420]
+    }
+  ],
+  "connections": {
+    "Loan Event Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC & Format Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC & Format Copy": {
+      "main": [
+        [
+          {
+            "node": "Signature Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature Valid?": {
+      "main": [
+        [
+          {
+            "node": "Send Notification Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401 Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Notification Email": {
+      "main": [
+        [
+          {
+            "node": "Build & Sign Event Ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build & Sign Event Ack": {
+      "main": [
+        [
+          {
+            "node": "Ack Event to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ack Event to Convex": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "lendloop-error-handler"
+  },
+  "tags": []
+}

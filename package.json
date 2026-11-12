@@ -1,0 +1,50 @@
+{
+  "name": "lendloop",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "convex:dev": "convex dev",
+    "convex:codegen": "convex codegen",
+    "convex:env": "node scripts/sync-convex-env.mjs",
+    "secrets:generate": "node scripts/generate-secrets.mjs",
+    "secrets:check": "node scripts/verify-no-leaked-secrets.mjs",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "seed": "convex run seed:seedDemoData",
+    "verify:all": "npm run secrets:check && npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@clerk/nextjs": "^7.9.25",
+    "clsx": "^2.1.1",
+    "convex": "^1.49.0",
+    "date-fns": "^4.4.0",
+    "lucide-react": "^1.72.0",
+    "next": "16.4.6",
+    "react": "19.2.9",
+    "react-dom": "19.2.9",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "@playwright/test": "^1.65.0",
+    "@tailwindcss/postcss": "^4.3.5",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "convex-test": "^0.0.70",
+    "eslint": "^9.22.0",
+    "eslint-config-next": "16.4.6",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9"
+  }
+}

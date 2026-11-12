@@ -1,0 +1,44 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: lendloop-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    env_file:
+      - .env.local
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - N8N_WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - GENERIC_TIMEZONE=UTC
+      - TZ=UTC
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      # Single-container Code node configuration for crypto + env HMAC secrets
+      - N8N_RUNNERS_MODE=internal
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+      - CONVEX_HTTP_BASE_URL=http://host.docker.internal:3211
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+    extra_hosts:
+      # Mandatory so Linux Docker hosts resolve host.docker.internal identically to Windows/macOS
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    depends_on:
+      - mailpit
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: lendloop-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025" # Web Inbox UI: http://localhost:8025
+      - "1025:1025" # SMTP Server (internal hostname: mailpit:1025)
+
+volumes:
+  n8n_data:

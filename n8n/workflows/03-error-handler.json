@@ -1,0 +1,127 @@
+{
+  "id": "lendloop-error-handler",
+  "name": "LendLoop - Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "30000001-0000-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst input = $input.first()?.json || {};\nconst workflowName = String(input.workflow?.name || 'Unknown Workflow');\nconst executionId = String(input.execution?.id || `exec_${Date.now()}`);\nconst failedNode = String(input.execution?.lastNodeExecuted || 'Unknown');\nconst rawError = String(\n  input.execution?.error?.message ||\n  input.execution?.error?.description ||\n  'Workflow execution failed'\n);\nconst errorMessage = rawError.slice(0, 300);\nconst idempotencyKey = `err:${workflowName}:${executionId}`;\n\nconst timestamp = String(Math.floor(Date.now() / 1000));\nconst rawBody = JSON.stringify({\n  idempotencyKey,\n  workflowName,\n  errorMessage,\n});\n\nconst secret = $env.CONVEX_AUTOMATION_SECRET || '';\nif (!secret || secret.length < 16) {\n  throw new Error('Missing or short CONVEX_AUTOMATION_SECRET environment variable (min 16 chars)');\n}\nconst signatureHex = crypto\n  .createHmac('sha256', secret)\n  .update(`${timestamp}.${rawBody}`)\n  .digest('hex');\n\nreturn [{\n  json: {\n    idempotencyKey,\n    workflowName,\n    executionId,\n    failedNode,\n    errorMessage,\n    timestamp,\n    signature: `sha256=${signatureHex}`,\n    rawBody,\n    alertSubject: `[LendLoop Automation Alert] Workflow Failure: ${workflowName}`,\n    alertText: `LendLoop n8n workflow failure detected.\\n\\nWorkflow: ${workflowName}\\nExecution ID: ${executionId}\\nFailed Node: ${failedNode}\\nError: ${errorMessage}\\nTimestamp: ${new Date().toISOString()}`,\n  },\n}];"
+      },
+      "id": "30000001-0000-4000-8000-000000000002",
+      "name": "Format & Sign Error Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.LENDLOOP_FROM_EMAIL || 'noreply@lendloop.local' }}",
+        "toEmail": "={{ $env.LENDLOOP_OPS_EMAIL || 'ops-alerts@lendloop.local' }}",
+        "subject": "={{ $json.alertSubject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.alertText }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "30000001-0000-4000-8000-000000000003",
+      "name": "Alert Admin in Mailpit",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [700, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true,
+      "credentials": {
+        "smtp": {
+          "id": "lendloop-mailpit-smtp",
+          "name": "LendLoop Mailpit SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.CONVEX_HTTP_BASE_URL || 'http://host.docker.internal:3211') + '/api/automation/error-callback' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Event-Id",
+              "value": "={{ $json.idempotencyKey }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.rawBody }}",
+        "options": {}
+      },
+      "id": "30000001-0000-4000-8000-000000000004",
+      "name": "Log Error to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format & Sign Error Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format & Sign Error Report": {
+      "main": [
+        [
+          {
+            "node": "Alert Admin in Mailpit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Error to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
+
