@@ -111,7 +111,7 @@ npm run dev
 4. Submit a borrow request or approve/return a loan and check **Mailpit** (`http://localhost:8025`) for the notification email.
 5. In n8n, open **LendLoop - Daily Overdue Reminders** and click **Test Workflow** (`Manual Test Trigger`), then verify the reminder email in Mailpit and `"Reminder sent just now"` on the loan card in `/dashboard` and `/admin`.
 
-- **Video Walkthrough**: *[Add your 2-minute Loom link here]*
+- **Video Walkthrough**: [Watch 2-Minute Loom Walkthrough](https://www.loom.com/share/a76d311f663f416abeb68a0ddb696830)
 
 ---
 
