@@ -101,7 +101,7 @@ npm run docker:up
    - `n8n/workflows/02-overdue-reminders.json` (**LendLoop - Daily Overdue Reminders**)
 4. Confirm the `Send Notification Email`, `Send Overdue Reminder`, and `Alert Admin in Mailpit` nodes select **`LendLoop Mailpit SMTP`**, confirm workflows `01` and `02` reference **`LendLoop - Error Handler`** in **Workflow Settings → Error Workflow**, and **activate all three workflows** (n8n CLI import deactivates imported workflows by default).
 
-### 6. Start Next.js & Test End-to-End in 60 Seconds
+### 6. Start Next.js & Test End-to-End
 ```bash
 npm run dev
 ```
@@ -111,7 +111,7 @@ npm run dev
 4. Submit a borrow request or approve/return a loan and check **Mailpit** (`http://localhost:8025`) for the notification email.
 5. In n8n, open **LendLoop - Daily Overdue Reminders** and click **Test Workflow** (`Manual Test Trigger`), then verify the reminder email in Mailpit and `"Reminder sent just now"` on the loan card in `/dashboard` and `/admin`.
 
-- **Video Walkthrough**: [Watch 2-Minute Loom Walkthrough](https://www.loom.com/share/a76d311f663f416abeb68a0ddb696830)
+- **Video Walkthrough**: Watch Loom Walkthrough (https://www.loom.com/share/a76d311f663f416abeb68a0ddb696830)
 
 ---
 
